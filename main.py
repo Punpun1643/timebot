@@ -1,16 +1,18 @@
 from telegram.ext import (Updater, CommandHandler, ConversationHandler, MessageHandler, Filters, CallbackContext)
 from telegram import KeyboardButton, ReplyKeyboardMarkup, Update
-from memory_datasource import MemoryDataSource
+from datasource import DataSource
+
 
 import os
 import threading
 import time
+import datetime
 
 TOKEN = os.getenv('TOKEN')
 ADD_REMINDER_TEXT = 'Add a reminder ⏰'
 INTERVAL = 30
 ENTER_MESSAGE, ENTER_TIME = range(2)
-dataSource = MemoryDataSource()
+dataSource = DataSource(os.environ.get("DATABASE_URL"))
 
 
 def start_handler(update, context):
@@ -36,8 +38,8 @@ def enter_message_handler(update: Update, context: CallbackContext):
 
 def enter_time_handler(update: Update, context: CallbackContext):
     message_text = context.user_data['message_text']
-    time = update.message.text
-    message_data = dataSource.add_reminder(update.message.chat_id, message_text, time)
+    time = datetime.datetime.strptime(update.message.text, "%d/%m/%Y %H:%M")
+    message_data = dataSource.create_reminder(update.message.chat_id, message_text, time)
     update.message.reply_text("Your reminder ⭐️" + "\n" + message_data.__repr__())
     return ConversationHandler.END
 
@@ -50,11 +52,10 @@ def start_check_reminders_task():
 
 def check_reminders():
     while True:
-        for chat_id in dataSource.reminders:
-            reminder_data = dataSource.reminders[chat_id]
+        for reminder_data in dataSource.get_all_reminders():
             if reminder_data.should_be_fired():
-                reminder_data.fire()
-                updater.bot.send_message(chat_id, reminder_data.message)
+                dataSource.fire_reminder(reminder_data.reminder_id)
+                updater.bot.send_message(reminder_data.reminder_id, reminder_data.message)
         time.sleep(INTERVAL)
 
 
@@ -70,5 +71,6 @@ if __name__ == '__main__':
         fallbacks=[]
     )
     updater.dispatcher.add_handler(conv_handler)
+    dataSource.create_tables()
     updater.start_polling()
     start_check_reminders_task()
